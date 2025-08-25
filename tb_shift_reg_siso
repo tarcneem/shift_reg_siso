@@ -1,0 +1,89 @@
+`timescale 1us/1ns
+module tb_shift_reg_siso;
+
+  // DUT I/O
+  reg  clk = 0;
+  reg  reset_n;
+  reg  sdi;
+  wire sdo;
+
+  // Instantiate DUT
+  shift_reg_siso SISO0 (
+    .reset_n (reset_n),
+    .clk     (clk),
+    .sdi     (sdi),
+    .sdo     (sdo)
+  );
+
+  // 1 MHz clock (period 1 us)
+  always #0.5 clk = ~clk;
+
+  // -------- Reference model (golden) --------
+  reg [3:0] ref_reg;
+
+  // Update reference same way as DUT
+  always @(posedge clk or negedge reset_n) begin
+    if (!reset_n)
+      ref_reg <= 4'b0000;
+    else
+      ref_reg <= {ref_reg[2:0], sdi};   // shift in current sdi
+  end
+
+  // Compare DUT vs reference after each posedge
+  always @(posedge clk) begin
+    if (reset_n) begin
+      if (SISO0.siso !== ref_reg)
+        $display("[%0t] ERROR: reg mismatch  DUT=%b  REF=%b", $time, SISO0.siso, ref_reg);
+      if (sdo !== ref_reg[3])
+        $display("[%0t] ERROR: sdo mismatch  sdo=%b  expected=%b", $time, sdo, ref_reg[3]);
+    end
+  end
+
+  // see activity in console
+  initial
+    $monitor("[%0t] reset_n=%b sdi=%b  DUT=%b sdo=%b  REF=%b",
+             $time, reset_n, sdi, SISO0.siso, sdo, ref_reg);
+
+  // -------- Stimulus helpers --------
+  task automatic push_bit(input reg b);
+    begin
+      @(negedge clk);  // set up before sampling edge
+      sdi = b;
+    end
+  endtask
+
+  // -------- Stimulus sequence --------
+  initial begin
+    // reset
+    reset_n = 0; sdi = 0;
+    repeat (2) @(posedge clk);
+    reset_n = 1;
+
+    // Send a '1' then zeros so we can watch it march out
+    push_bit(1'b1);
+    push_bit(1'b0);
+    push_bit(1'b0);
+    push_bit(1'b0);
+
+    // Gap of zeros
+    repeat (2) push_bit(1'b0);
+
+    // Send another '1' then zeros
+    push_bit(1'b1);
+    push_bit(1'b0);
+    push_bit(1'b0);
+    push_bit(1'b0);
+
+    // Let it shift out completely
+    repeat (6) @(posedge clk);
+
+    #2 $finish;
+  end
+
+  // Wave dump for local viewing
+  initial begin
+    $dumpfile("wave.vcd");
+    $dumpvars(0, tb_shift_reg_siso);
+  end
+
+endmodule
